@@ -1,0 +1,870 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>ShareMe Clone - Real P2P Transfer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- PeerJS for Real WebRTC P2P Connections -->
+    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
+    
+    <!-- QR Code Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        /* Custom Scrollbar for file list */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 10px;
+        }
+        
+        .pulse-btn {
+            animation: pulse-soft 2s infinite;
+        }
+        
+        @keyframes pulse-soft {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+
+        /* Shareit Specific Styles */
+        .shareit-bg {
+            background: linear-gradient(135deg, #1890ff 0%, #00d2ff 100%);
+        }
+        
+        .radar-circle {
+            position: absolute;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            animation: radar-pulse 3s infinite linear;
+        }
+
+        .radar-circle:nth-child(1) { width: 100px; height: 100px; animation-delay: 0s; }
+        .radar-circle:nth-child(2) { width: 180px; height: 180px; animation-delay: 1s; }
+        .radar-circle:nth-child(3) { width: 260px; height: 260px; animation-delay: 2s; }
+        .radar-circle:nth-child(4) { width: 340px; height: 340px; animation-delay: 3s; }
+
+        @keyframes radar-pulse {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+        }
+
+        .nav-tab.active {
+            color: #1890ff;
+            border-bottom: 2px solid #1890ff;
+        }
+
+        /* Hide sections by default for SPA feel */
+        .screen {
+            display: none;
+        }
+        .screen.active {
+            display: flex;
+        }
+    </style>
+</head>
+<body class="h-screen w-full overflow-hidden text-gray-800">
+
+    <!-- App Container (Mobile Sized) -->
+    <div class="h-full w-full max-w-md mx-auto bg-gray-50 shadow-2xl relative flex flex-col overflow-hidden sm:rounded-3xl sm:h-[90vh] sm:mt-[5vh]">
+        
+        <!-- Top Navigation Bar -->
+        <header class="shareit-bg text-white p-4 flex justify-between items-center z-20 shadow-md shrink-0 border-b border-white/10">
+            <div class="flex items-center gap-3">
+                <div class="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center">
+                    <i class="fas fa-user text-sm"></i>
+                </div>
+                <h1 class="text-xl font-bold tracking-wide">ShareMe</h1>
+            </div>
+            <div class="flex gap-4 items-center">
+                <span id="connectionStatus" class="w-2 h-2 rounded-full bg-red-400" title="Disconnected"></span>
+                <button class="hover:text-blue-200 transition"><i class="fas fa-search text-lg"></i></button>
+                <button class="hover:text-blue-200 transition"><i class="fas fa-bars text-lg"></i></button>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 relative overflow-hidden bg-gray-50 flex flex-col">
+            
+            <!-- 1. Home Screen (Send/Receive) -->
+            <div id="homeScreen" class="screen active flex-col h-full w-full relative">
+                <!-- Shareit Style Top Card -->
+                <div class="bg-white rounded-b-3xl shadow-sm p-6 pt-8 pb-10 mb-2 relative z-10">
+                    <div class="flex justify-between items-center mb-8">
+                        <div>
+                            <h2 class="text-gray-500 text-sm font-medium mb-1">Device ID</h2>
+                            <p id="myDeviceIdDisplay" class="text-2xl font-bold text-gray-800 tracking-wide">...</p>
+                            <p class="text-[10px] text-gray-400 mt-1"><i class="fas fa-wifi text-blue-400 mr-1"></i>WebRTC Ready</p>
+                        </div>
+                        <div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center border border-blue-100 shadow-inner">
+                            <i class="fas fa-mobile-alt text-3xl text-blue-500"></i>
+                        </div>
+                    </div>
+
+                    <!-- Main Action Buttons -->
+                    <div class="flex w-full gap-4">
+                        <button onclick="initiateSend()" class="flex-1 shareit-bg text-white py-4 rounded-2xl shadow-[0_8px_15px_rgba(24,144,255,0.3)] flex flex-col items-center gap-2 active:scale-95 transition-transform">
+                            <div class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center mb-1">
+                                <i class="fas fa-paper-plane text-2xl"></i>
+                            </div>
+                            <span class="font-bold text-lg">Send</span>
+                        </button>
+                        <button onclick="initiateReceive()" class="flex-1 bg-white text-blue-500 border border-blue-100 py-4 rounded-2xl shadow-[0_8px_15px_rgba(0,0,0,0.05)] flex flex-col items-center gap-2 active:scale-95 transition-transform">
+                            <div class="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center mb-1">
+                                <i class="fas fa-download text-2xl"></i>
+                            </div>
+                            <span class="font-bold text-lg">Receive</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Quick Categories -->
+                <div class="flex-1 px-4 py-4 overflow-y-auto pb-20 custom-scrollbar">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-gray-700">Quick Share</h3>
+                    </div>
+                    <div class="grid grid-cols-4 gap-3 text-center">
+                        <div onclick="initiateSend()" class="flex flex-col items-center gap-1 cursor-pointer">
+                            <div class="w-12 h-12 bg-yellow-100 text-yellow-600 rounded-xl flex items-center justify-center text-xl"><i class="fas fa-images"></i></div>
+                            <span class="text-xs font-medium text-gray-600">Photos</span>
+                        </div>
+                        <div onclick="initiateSend()" class="flex flex-col items-center gap-1 cursor-pointer">
+                            <div class="w-12 h-12 bg-red-100 text-red-600 rounded-xl flex items-center justify-center text-xl"><i class="fas fa-play-circle"></i></div>
+                            <span class="text-xs font-medium text-gray-600">Videos</span>
+                        </div>
+                        <div onclick="initiateSend()" class="flex flex-col items-center gap-1 cursor-pointer">
+                            <div class="w-12 h-12 bg-green-100 text-green-600 rounded-xl flex items-center justify-center text-xl"><i class="fab fa-android"></i></div>
+                            <span class="text-xs font-medium text-gray-600">Apps</span>
+                        </div>
+                        <div onclick="initiateSend()" class="flex flex-col items-center gap-1 cursor-pointer">
+                            <div class="w-12 h-12 bg-blue-100 text-blue-600 rounded-xl flex items-center justify-center text-xl"><i class="fas fa-folder"></i></div>
+                            <span class="text-xs font-medium text-gray-600">Files</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Fake Banner -->
+                    <div class="mt-6 bg-gradient-to-r from-purple-500 to-indigo-500 rounded-2xl p-4 text-white flex items-center justify-between shadow-md">
+                        <div>
+                            <h4 class="font-bold text-sm">Clean Phone Storage</h4>
+                            <p class="text-xs text-purple-200 mt-1">Free up to 2.5 GB</p>
+                        </div>
+                        <button class="bg-white text-purple-600 px-4 py-1.5 rounded-full text-xs font-bold shadow-sm">Clean</button>
+                    </div>
+                </div>
+
+                <!-- Bottom Navigation -->
+                <div class="absolute bottom-0 w-full bg-white border-t border-gray-100 flex justify-around items-center py-2 pb-4 px-2 z-20 shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
+                    <div class="flex flex-col items-center text-blue-500 gap-1 cursor-pointer">
+                        <i class="fas fa-exchange-alt text-xl"></i>
+                        <span class="text-[10px] font-bold">Transfer</span>
+                    </div>
+                    <div class="flex flex-col items-center text-gray-400 gap-1 cursor-pointer hover:text-blue-500">
+                        <i class="fas fa-gamepad text-xl"></i>
+                        <span class="text-[10px] font-medium">Games</span>
+                    </div>
+                    <div class="flex flex-col items-center text-gray-400 gap-1 cursor-pointer hover:text-blue-500">
+                        <i class="fas fa-user-circle text-xl"></i>
+                        <span class="text-[10px] font-medium">Me</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. File Selection Screen (Send Mode) -->
+            <div id="fileSelectScreen" class="screen flex-col h-full w-full bg-gray-50">
+                <div class="bg-white shadow-sm shrink-0">
+                    <div class="p-4 flex items-center gap-4">
+                        <button onclick="goBackToHome()" class="text-gray-600 text-xl"><i class="fas fa-arrow-left"></i></button>
+                        <h2 class="text-lg font-bold flex-1">Select Files</h2>
+                        <button class="text-gray-600"><i class="fas fa-search"></i></button>
+                    </div>
+                    <!-- Tabs -->
+                    <div class="flex overflow-x-auto custom-scrollbar px-2 border-b border-gray-100">
+                        <button class="nav-tab active px-4 py-3 font-semibold text-sm whitespace-nowrap">Files</button>
+                        <button class="nav-tab text-gray-500 px-4 py-3 font-semibold text-sm whitespace-nowrap">Videos</button>
+                        <button class="nav-tab text-gray-500 px-4 py-3 font-semibold text-sm whitespace-nowrap">Apps</button>
+                        <button class="nav-tab text-gray-500 px-4 py-3 font-semibold text-sm whitespace-nowrap">Photos</button>
+                    </div>
+                </div>
+
+                <!-- Real File Input Trigger -->
+                <div class="p-6 flex flex-col items-center justify-center shrink-0">
+                    <div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-3">
+                        <i class="fas fa-folder-plus text-2xl text-blue-500"></i>
+                    </div>
+                    <input type="file" id="nativeFilePicker" multiple class="hidden" onchange="handleFileSelection(event)">
+                    <button onclick="document.getElementById('nativeFilePicker').click()" class="bg-blue-500 text-white px-6 py-2.5 rounded-full font-bold shadow-md shadow-blue-200 active:scale-95 transition-transform">
+                        Browse Device Storage
+                    </button>
+                </div>
+
+                <!-- Selected Files List -->
+                <div class="flex-1 overflow-y-auto px-3 pb-4 pt-2 custom-scrollbar" id="selectedFilesContainer">
+                    <div class="flex flex-col items-center justify-center text-gray-400 mt-10 h-full">
+                        <i class="fas fa-box-open text-4xl mb-3 opacity-50"></i>
+                        <p class="text-sm">No items selected</p>
+                    </div>
+                </div>
+
+                <!-- Bottom Action Bar -->
+                <div class="w-full bg-white p-4 border-t shadow-[0_-4px_15px_rgba(0,0,0,0.05)] flex justify-between items-center z-20 shrink-0 relative mt-auto">
+                    <div>
+                        <p class="text-xs text-gray-500 mb-0.5">Selected</p>
+                        <div class="flex items-center gap-2">
+                            <span id="selectedCountBadge" class="bg-blue-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full hidden">0</span>
+                            <span id="totalSizeTxt" class="font-bold text-gray-800 text-lg">0 B</span>
+                        </div>
+                    </div>
+                    <button id="nextBtn" onclick="showConnectScreen()" class="bg-blue-500 text-white px-8 py-3 rounded-full font-bold shadow-lg shadow-blue-200 opacity-50 cursor-not-allowed transition-all flex items-center gap-2" disabled>
+                        Send <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3. Connect (Radar) Screen (SENDER) -->
+            <div id="connectScreen" class="screen flex-col h-full w-full shareit-bg relative overflow-hidden text-white">
+                <div class="p-4 flex items-center z-20 relative shrink-0">
+                    <button onclick="showScreen('fileSelectScreen')" class="p-2 text-white hover:bg-white/20 rounded-full transition"><i class="fas fa-arrow-left"></i></button>
+                    <h2 class="ml-4 text-lg font-bold">Select Receiver</h2>
+                </div>
+
+                <!-- Radar Animation -->
+                <div class="flex-1 relative flex items-center justify-center overflow-hidden">
+                    <div class="radar-circle"></div>
+                    <div class="radar-circle"></div>
+                    <div class="radar-circle"></div>
+                    <div class="radar-circle"></div>
+                    
+                    <!-- Sender Avatar -->
+                    <div class="z-10 w-20 h-20 bg-white rounded-full p-1 shadow-[0_0_20px_rgba(255,255,255,0.5)]">
+                        <div class="w-full h-full bg-blue-100 rounded-full flex items-center justify-center border-2 border-blue-500">
+                            <i class="fas fa-user-astronaut text-3xl text-blue-500"></i>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Search Input overlaying radar -->
+                <div class="absolute bottom-8 w-full px-6 z-20">
+                    <div class="bg-white/10 backdrop-blur-md border border-white/20 p-5 rounded-3xl text-center shadow-2xl">
+                        <p class="text-sm font-medium mb-3">Enter receiver's ID or Scan QR</p>
+                        
+                        <!-- FIX: Input Box AND QR Scanner Button side-by-side -->
+                        <div class="flex gap-2 mb-4">
+                            <input type="text" id="receiverIdInput" placeholder="ID (e.g. A1B2C)" class="w-full text-center text-lg tracking-widest font-bold py-3.5 rounded-xl border-none outline-none uppercase bg-white text-blue-600 shadow-inner">
+                            <button onclick="startQRScanner()" class="bg-blue-600 text-white w-16 rounded-xl flex items-center justify-center shadow-md active:scale-95 transition-transform" title="Scan QR Code">
+                                <i class="fas fa-qrcode text-2xl"></i>
+                            </button>
+                        </div>
+                        
+                        <button onclick="connectToPeer()" id="connectBtn" class="bg-white text-blue-600 w-full py-3.5 rounded-xl font-bold shadow-lg active:scale-95 transition-transform text-lg">
+                            Connect
+                        </button>
+                        <p id="connectError" class="text-red-200 text-xs mt-3 hidden font-medium"></p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 4. Receive Wait Screen (RECEIVER) -->
+            <div id="receiveScreen" class="screen flex-col h-full w-full shareit-bg text-white relative overflow-hidden">
+                <!-- Header properly separated -->
+                <div class="p-4 flex items-center z-20 shrink-0 relative w-full">
+                    <button onclick="goBackToHome()" class="p-2 text-white hover:bg-white/20 rounded-full transition"><i class="fas fa-arrow-left"></i></button>
+                </div>
+                
+                <!-- Radar & QR Code Display -->
+                <div class="flex-1 relative flex flex-col items-center justify-center z-10 text-center px-4 -mt-10">
+                    <!-- Receiver Avatar -->
+                    <div class="w-20 h-20 bg-white rounded-full p-1 shadow-[0_0_30px_rgba(255,255,255,0.6)] mx-auto mb-6 pulse-btn">
+                        <div class="w-full h-full bg-blue-500 rounded-full flex items-center justify-center">
+                            <i class="fas fa-satellite-dish text-3xl text-white"></i>
+                        </div>
+                    </div>
+                    
+                    <p class="text-blue-100 text-sm mb-2 font-medium">Your Device ID & QR Code</p>
+                    
+                    <div class="bg-white/20 backdrop-blur-md p-4 rounded-3xl border border-white/30 inline-block shadow-lg mb-6">
+                        <div class="text-white text-4xl font-bold tracking-widest mb-4">
+                            <span id="receiveDeviceId">...</span>
+                        </div>
+                        <!-- Safe QR Code Container -->
+                        <div class="bg-white p-3 rounded-2xl mx-auto shadow-md w-fit h-fit" style="min-height: 150px; min-width: 150px; display:flex; align-items:center; justify-content:center;">
+                            <div id="qrcode"></div>
+                        </div>
+                    </div>
+                    
+                    <p class="text-sm text-blue-100 animate-pulse font-medium">
+                        <i class="fas fa-spinner fa-spin mr-2"></i> Waiting for sender to scan...
+                    </p>
+                </div>
+            </div>
+
+            <!-- 5. Transfer Progress Screen -->
+            <div id="transferScreen" class="screen flex-col h-full w-full bg-gray-50 relative">
+                <!-- Header -->
+                <div class="shareit-bg p-4 flex items-center justify-between text-white shrink-0 shadow-md z-10">
+                    <div class="flex items-center gap-3">
+                        <button onclick="goBackToHome()" class="p-2 -ml-2 text-white hover:bg-white/20 rounded-full transition" title="Back to Home"><i class="fas fa-arrow-left"></i></button>
+                        <h2 class="text-lg font-bold" id="transferTitle">Transferring</h2>
+                    </div>
+                    <div class="flex items-center gap-2 bg-white/20 px-3 py-1.5 rounded-full text-xs font-bold border border-white/30 backdrop-blur-sm">
+                        <span class="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span> Connected
+                    </div>
+                </div>
+
+                <!-- Overall Progress Card -->
+                <div class="bg-white p-5 shadow-sm shrink-0 z-0 relative pb-6 border-b border-gray-100">
+                    <div class="flex justify-between items-end mb-3">
+                        <div>
+                            <p class="text-xs text-gray-500 mb-0.5">Total Progress</p>
+                            <span class="font-bold text-blue-600 text-2xl leading-none" id="overallProgressText">0%</span>
+                        </div>
+                        <span class="text-sm font-semibold text-gray-600" id="overallSizeText">0 / 0 MB</span>
+                    </div>
+                    <div class="h-2.5 w-full bg-gray-100 rounded-full overflow-hidden shadow-inner">
+                         <div id="overallProgressBar" class="h-full shareit-bg w-0 transition-all duration-300 rounded-full"></div>
+                    </div>
+                </div>
+
+                <!-- Transferring Files List -->
+                <div class="flex-1 overflow-y-auto p-3 bg-gray-50 custom-scrollbar" id="transferListContainer">
+                    <!-- Transfer items generated by JS -->
+                </div>
+                
+                <div id="saveAllContainer" class="p-4 bg-white border-t border-gray-100 hidden shrink-0 shadow-[0_-4px_15px_rgba(0,0,0,0.03)] z-10">
+                     <button onclick="downloadReceivedFiles()" class="w-full shareit-bg text-white font-bold py-3.5 rounded-2xl shadow-lg shadow-blue-200 flex justify-center items-center gap-2 active:scale-95 transition-transform">
+                         <i class="fas fa-save text-lg"></i> Save All to Device
+                     </button>
+                </div>
+            </div>
+
+            <!-- Preview Modal -->
+            <div id="previewModal" class="fixed inset-0 bg-black/95 z-[100] hidden flex-col items-center justify-center p-4">
+                <button onclick="closePreview()" class="absolute top-4 right-4 text-white text-3xl p-2"><i class="fas fa-times"></i></button>
+                <div id="previewContainer" class="w-full max-w-full flex items-center justify-center overflow-hidden">
+                    <!-- Image or Video will be injected here -->
+                </div>
+            </div>
+
+            <!-- QR Scanner Modal -->
+            <div id="qrScannerModal" class="fixed inset-0 bg-black/95 z-[100] hidden flex-col items-center justify-center p-4">
+                <button onclick="stopQRScanner()" class="absolute top-4 right-4 text-white text-3xl p-2 z-50"><i class="fas fa-times"></i></button>
+                <h3 class="text-white font-bold mb-4 z-50 text-xl">Scan Receiver's QR Code</h3>
+                <div class="w-full max-w-sm bg-white rounded-2xl overflow-hidden relative shadow-2xl">
+                    <div id="qr-reader" class="w-full"></div>
+                </div>
+                <p class="text-gray-300 text-sm mt-4 text-center">Point camera at the receiver's screen</p>
+            </div>
+
+        </main>
+    </div>
+
+    <script>
+        // --- State Variables ---
+        let myPeerId = '';
+        let peer = null;
+        let conn = null;
+        let html5QrcodeScanner = null;
+        
+        let pendingFilesToSend = []; // Array of JS File objects
+        let totalSendSize = 0;
+        
+        // Receiver State
+        let receiveBuffer = [];
+        let currentReceiveMeta = null;
+        let receivedFilesCache = []; // Stores completed blobs for downloading
+        let totalReceiveSize = 0;
+        let totalReceivedBytes = 0;
+
+        const CHUNK_SIZE = 16 * 1024; // 16KB per chunk safe for mobile
+
+        // --- Utility Functions ---
+        function generateShortID() {
+            return Math.random().toString(36).substring(2, 7).toUpperCase();
+        }
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        function showScreen(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+        }
+
+        // --- Initialization & PeerJS Setup ---
+        window.addEventListener('DOMContentLoaded', () => {
+            initializePeer();
+        });
+
+        function initializePeer() {
+            myPeerId = generateShortID();
+            document.getElementById('myDeviceIdDisplay').innerText = myPeerId;
+            document.getElementById('receiveDeviceId').innerText = myPeerId;
+
+            peer = new Peer(myPeerId, {
+                debug: 2,
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:global.stun.twilio.com:3478' }
+                    ]
+                }
+            });
+
+            peer.on('open', (id) => {
+                document.querySelector('.text-xs.text-gray-400').innerText = "Ready to connect";
+                document.getElementById('connectionStatus').classList.replace('bg-red-400', 'bg-green-400');
+            });
+
+            peer.on('disconnected', () => {
+                document.getElementById('connectionStatus').classList.replace('bg-green-400', 'bg-yellow-400');
+                peer.reconnect();
+            });
+
+            // Handle Incoming Connections (Receiver Mode)
+            peer.on('connection', (connection) => {
+                conn = connection;
+                setupConnectionHandlers();
+                showScreen('transferScreen');
+                document.getElementById('transferTitle').innerHTML = `<i class="fas fa-download mr-2 text-blue-600"></i>Receiving Data...`;
+            });
+        }
+
+        // --- Navigation ---
+        function goBackToHome() {
+            pendingFilesToSend = [];
+            receivedFilesCache = [];
+            totalReceiveSize = 0;
+            totalReceivedBytes = 0;
+            
+            updateSelectionUI();
+            
+            if(conn) {
+                try { conn.close(); } catch(e) {}
+                conn = null;
+            }
+            
+            document.getElementById('transferListContainer').innerHTML = '';
+            document.getElementById('overallProgressText').innerText = '0%';
+            document.getElementById('overallProgressBar').style.width = '0%';
+            document.getElementById('overallProgressBar').classList.replace('bg-green-500', 'bg-blue-600');
+            document.getElementById('overallSizeText').innerText = '0 B / 0 MB';
+            document.getElementById('saveAllContainer').classList.add('hidden');
+            
+            showScreen('homeScreen');
+        }
+
+        function initiateSend() {
+            showScreen('fileSelectScreen');
+        }
+
+        function initiateReceive() {
+            showScreen('receiveScreen');
+            
+            // FIX: Delay QR code generation slightly so the UI is visible, prevents 0x0 bug
+            setTimeout(() => {
+                const qrContainer = document.getElementById('qrcode');
+                qrContainer.innerHTML = ''; // Clear existing
+                new QRCode(qrContainer, {
+                    text: myPeerId,
+                    width: 150,
+                    height: 150,
+                    colorDark : "#1890ff",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+            }, 300);
+        }
+
+        function showConnectScreen() {
+            if(pendingFilesToSend.length === 0) return;
+            showScreen('connectScreen');
+        }
+
+        // --- File Selection ---
+        function handleFileSelection(event) {
+            const files = event.target.files;
+            if(!files || files.length === 0) return;
+            for(let i=0; i<files.length; i++) {
+                pendingFilesToSend.push(files[i]);
+            }
+            event.target.value = ''; 
+            renderSelectedFiles();
+            updateSelectionUI();
+        }
+
+        function removeSelectedFile(index) {
+            pendingFilesToSend.splice(index, 1);
+            renderSelectedFiles();
+            updateSelectionUI();
+        }
+
+        function getFileIcon(type) {
+            if(type.startsWith('image/')) return 'fa-file-image text-purple-500';
+            if(type.startsWith('video/')) return 'fa-file-video text-orange-500';
+            if(type.startsWith('audio/')) return 'fa-file-audio text-blue-500';
+            if(type.includes('pdf')) return 'fa-file-pdf text-red-500';
+            if(type.includes('zip') || type.includes('rar')) return 'fa-file-archive text-yellow-500';
+            return 'fa-file-alt text-gray-500';
+        }
+
+        function renderSelectedFiles() {
+            const container = document.getElementById('selectedFilesContainer');
+            if(pendingFilesToSend.length === 0) {
+                container.innerHTML = `
+                    <div class="flex flex-col items-center justify-center text-gray-400 mt-10 h-full">
+                        <i class="fas fa-box-open text-4xl mb-3 opacity-50"></i>
+                        <p class="text-sm">No items selected</p>
+                    </div>`;
+                return;
+            }
+
+            container.innerHTML = '';
+            pendingFilesToSend.forEach((file, index) => {
+                const iconClass = getFileIcon(file.type);
+                container.innerHTML += `
+                    <div class="flex items-center justify-between p-3 mb-2.5 rounded-2xl bg-white shadow-sm border border-gray-100 hover:shadow-md transition">
+                        <div class="flex items-center gap-4 overflow-hidden">
+                            <div class="w-12 h-12 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shrink-0 border border-blue-100">
+                                <i class="fas ${iconClass} text-2xl"></i>
+                            </div>
+                            <div class="overflow-hidden">
+                                <h4 class="font-bold text-gray-800 text-sm truncate w-40">${file.name}</h4>
+                                <p class="text-xs text-gray-500 mt-0.5 font-medium">${formatBytes(file.size)}</p>
+                            </div>
+                        </div>
+                        <button onclick="removeSelectedFile(${index})" class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-red-50 hover:text-red-500 transition shrink-0">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
+                `;
+            });
+        }
+
+        function updateSelectionUI() {
+            totalSendSize = pendingFilesToSend.reduce((acc, file) => acc + file.size, 0);
+            document.getElementById('totalSizeTxt').innerText = formatBytes(totalSendSize);
+            
+            const badge = document.getElementById('selectedCountBadge');
+            const btn = document.getElementById('nextBtn');
+
+            if (pendingFilesToSend.length > 0) {
+                badge.innerText = pendingFilesToSend.length;
+                badge.classList.remove('hidden');
+                btn.classList.remove('opacity-50', 'cursor-not-allowed');
+                btn.disabled = false;
+            } else {
+                badge.classList.add('hidden');
+                btn.classList.add('opacity-50', 'cursor-not-allowed');
+                btn.disabled = true;
+            }
+        }
+
+        // --- QR Scanner (Sender Side) ---
+        function startQRScanner() {
+            document.getElementById('qrScannerModal').classList.remove('hidden');
+            document.getElementById('qrScannerModal').classList.add('flex');
+            
+            if(!html5QrcodeScanner) {
+                html5QrcodeScanner = new Html5Qrcode("qr-reader");
+            }
+            
+            html5QrcodeScanner.start(
+                { facingMode: "environment" },
+                { fps: 10, qrbox: { width: 250, height: 250 } },
+                (decodedText) => {
+                    stopQRScanner();
+                    document.getElementById('receiverIdInput').value = decodedText;
+                    connectToPeer(); 
+                },
+                (errorMessage) => { /* ignore */ }
+            ).catch(err => {
+                alert("Camera access denied. Please enter ID manually.");
+                stopQRScanner();
+            });
+        }
+
+        function stopQRScanner() {
+            document.getElementById('qrScannerModal').classList.add('hidden');
+            document.getElementById('qrScannerModal').classList.remove('flex');
+            if (html5QrcodeScanner && html5QrcodeScanner.isScanning) {
+                html5QrcodeScanner.stop().catch(e => console.error(e));
+            }
+        }
+
+        // --- Connection & Transfer logic ---
+        function connectToPeer() {
+            const receiverId = document.getElementById('receiverIdInput').value.trim().toUpperCase();
+            if(!receiverId) return;
+
+            document.getElementById('connectBtn').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting...';
+            document.getElementById('connectBtn').disabled = true;
+
+            conn = peer.connect(receiverId, { reliable: true });
+
+            conn.on('open', () => {
+                setupConnectionHandlers();
+                showScreen('transferScreen');
+                document.getElementById('transferTitle').innerHTML = `<i class="fas fa-upload mr-2 text-blue-600"></i>Sending Data...`;
+                startSendingProcess();
+            });
+
+            conn.on('error', () => {
+                document.getElementById('connectError').innerText = "Failed to connect. Check ID.";
+                document.getElementById('connectError').classList.remove('hidden');
+                document.getElementById('connectBtn').innerHTML = 'Connect';
+                document.getElementById('connectBtn').disabled = false;
+            });
+        }
+
+        function setupConnectionHandlers() {
+            conn.on('data', async (data) => {
+                if (data && data.type === 'metadata') {
+                    totalReceiveSize = data.totalSize;
+                    document.getElementById('overallSizeText').innerText = `0 B / ${formatBytes(totalReceiveSize)}`;
+                }
+                else if (data && data.type === 'file-start') {
+                    currentReceiveMeta = data;
+                    currentReceiveMeta.bytesReceived = 0;
+                    receiveBuffer = [];
+                    createTransferUIItem(data.name, data.size, data.mime, data.id);
+                } 
+                else if (data && data.type === 'file-end') {
+                    processReceivedFile(currentReceiveMeta);
+                }
+                else if (data && data.type === 'all-done') {
+                    document.getElementById('overallProgressText').innerText = "100%";
+                    document.getElementById('overallProgressBar').style.width = '100%';
+                    document.getElementById('overallProgressBar').classList.replace('bg-blue-600', 'bg-green-500');
+                    document.getElementById('transferTitle').innerHTML = `<i class="fas fa-check-circle mr-2 text-green-500"></i>Complete`;
+                    if(receivedFilesCache.length > 0) {
+                         document.getElementById('saveAllContainer').classList.remove('hidden');
+                    }
+                }
+                else if (data) {
+                    // FIX: Handle both ArrayBuffer and Blob gracefully
+                    let chunkSize = (data instanceof Blob) ? data.size : (data.byteLength || (data.buffer ? data.buffer.byteLength : 0));
+                    
+                    receiveBuffer.push(data);
+                    totalReceivedBytes += chunkSize;
+                    currentReceiveMeta.bytesReceived += chunkSize;
+                    
+                    updateFileProgressUI(currentReceiveMeta.id, currentReceiveMeta.bytesReceived, currentReceiveMeta.size);
+                    updateOverallProgressUI(totalReceivedBytes, totalReceiveSize);
+                }
+            });
+
+            conn.on('close', () => {
+                goBackToHome();
+            });
+        }
+
+        async function startSendingProcess() {
+            conn.send({ type: 'metadata', totalSize: totalSendSize });
+            let totalSentBytes = 0;
+            document.getElementById('overallSizeText').innerText = `0 B / ${formatBytes(totalSendSize)}`;
+
+            for (let i = 0; i < pendingFilesToSend.length; i++) {
+                const file = pendingFilesToSend[i];
+                const fileId = 'file_' + Date.now() + '_' + i;
+                
+                createTransferUIItem(file.name, file.size, file.type, fileId);
+                
+                await sendSingleFile(file, fileId, (bytesSentThisFile) => {
+                    updateFileProgressUI(fileId, bytesSentThisFile, file.size);
+                    updateOverallProgressUI(totalSentBytes + bytesSentThisFile, totalSendSize);
+                });
+                totalSentBytes += file.size;
+            }
+
+            conn.send({ type: 'all-done' });
+            document.getElementById('overallProgressText').innerText = "100%";
+            document.getElementById('overallProgressBar').style.width = '100%';
+            document.getElementById('overallProgressBar').classList.replace('bg-blue-600', 'bg-green-500');
+            document.getElementById('transferTitle').innerHTML = `<i class="fas fa-check-circle mr-2 text-green-500"></i>Sent Successfully`;
+        }
+
+        function sendSingleFile(file, fileId, progressCallback) {
+            return new Promise(async (resolve) => {
+                conn.send({ type: 'file-start', name: file.name, size: file.size, mime: file.type, id: fileId });
+
+                let offset = 0;
+                const readSlice = (o, s) => new Promise(res => {
+                    const reader = new FileReader();
+                    reader.onload = e => res(e.target.result);
+                    reader.readAsArrayBuffer(file.slice(o, o + s));
+                });
+
+                while (offset < file.size) {
+                    if (conn.dataChannel && conn.dataChannel.bufferedAmount > 8 * 1024 * 1024) {
+                        await new Promise(r => setTimeout(r, 50));
+                        continue;
+                    }
+                    const buffer = await readSlice(offset, CHUNK_SIZE);
+                    conn.send(buffer);
+                    offset += buffer.byteLength;
+                    progressCallback(offset);
+                    
+                    if(offset % (CHUNK_SIZE * 5) === 0) {
+                        await new Promise(r => setTimeout(r, 0));
+                    }
+                }
+
+                // FIX for 13KB cutoff: Wait for buffer to clear before sending 'file-end'
+                while(conn.dataChannel && conn.dataChannel.bufferedAmount > 0) {
+                    await new Promise(r => setTimeout(r, 100));
+                }
+
+                conn.send({ type: 'file-end' });
+                resolve();
+            });
+        }
+
+        function processReceivedFile(meta) {
+            const blob = new Blob(receiveBuffer, { type: meta.mime });
+            
+            receivedFilesCache.push({
+                id: meta.id,
+                blob: blob,
+                name: meta.name,
+                mime: meta.mime
+            });
+
+            const el = document.getElementById(`transfer_${meta.id}`);
+            if(el) {
+                el.querySelector('.file-progress-bar').classList.replace('bg-blue-500', 'bg-green-500');
+                el.querySelector('.file-percent-txt').innerText = 'Done';
+                el.querySelector('.file-percent-txt').classList.replace('text-blue-600', 'text-green-600');
+                
+                if (meta.mime && (meta.mime.startsWith('image/') || meta.mime.startsWith('video/'))) {
+                    const viewBtn = document.getElementById(`viewBtn_${meta.id}`);
+                    if(viewBtn) viewBtn.classList.remove('hidden');
+                }
+
+                const dlBtn = document.getElementById(`downloadBtn_${meta.id}`);
+                if(dlBtn) dlBtn.classList.remove('hidden');
+            }
+            receiveBuffer = [];
+        }
+
+        function downloadFileFromCache(id) {
+            const fileData = receivedFilesCache.find(f => f.id === id);
+            if(fileData) {
+                const url = URL.createObjectURL(fileData.blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = fileData.name;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                }, 1000);
+            }
+        }
+
+        function downloadReceivedFiles() {
+            receivedFilesCache.forEach((fileData, index) => {
+                setTimeout(() => { downloadFileFromCache(fileData.id); }, index * 500);
+            });
+        }
+
+        function createTransferUIItem(name, size, type, id) {
+            const container = document.getElementById('transferListContainer');
+            const iconClass = getFileIcon(type);
+            
+            container.innerHTML += `
+                <div id="transfer_${id}" class="bg-white p-4 rounded-2xl shadow-sm mb-3 border border-gray-100 relative overflow-hidden">
+                    <div class="flex items-center gap-4 mb-3 relative z-10">
+                        <div class="w-12 h-12 rounded-xl bg-gray-50 flex items-center justify-center shrink-0 border border-gray-100 text-gray-500">
+                            <i class="fas ${iconClass} text-xl"></i>
+                        </div>
+                        <div class="flex-1 overflow-hidden">
+                            <h4 class="font-bold text-sm text-gray-800 truncate w-32" title="${name}">${name}</h4>
+                            <div class="flex justify-between text-xs font-medium text-gray-500 mt-1">
+                                <span class="file-progress-txt">0 B / ${formatBytes(size)}</span>
+                                <span class="file-percent-txt text-blue-500 font-bold">0%</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button id="viewBtn_${id}" onclick="openPreview('${id}')" class="hidden bg-purple-50 border border-purple-100 text-purple-600 w-9 h-9 rounded-full flex items-center justify-center hover:bg-purple-100 transition shadow-sm">
+                                <i class="fas fa-eye text-sm"></i>
+                            </button>
+                            <button id="downloadBtn_${id}" onclick="downloadFileFromCache('${id}')" class="hidden bg-blue-50 border border-blue-100 text-blue-600 w-9 h-9 rounded-full flex items-center justify-center hover:bg-blue-100 transition shadow-sm">
+                                <i class="fas fa-download text-sm"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden relative z-10">
+                        <div class="file-progress-bar h-full shareit-bg w-0 transition-none rounded-full"></div>
+                    </div>
+                </div>
+            `;
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function updateFileProgressUI(id, bytesTransferred, totalBytes) {
+            const el = document.getElementById(`transfer_${id}`);
+            if(!el) return;
+            const percent = Math.min((bytesTransferred / totalBytes) * 100, 100);
+            el.querySelector('.file-progress-txt').innerText = `${formatBytes(bytesTransferred)} / ${formatBytes(totalBytes)}`;
+            el.querySelector('.file-percent-txt').innerText = Math.floor(percent) + '%';
+            el.querySelector('.file-progress-bar').style.width = percent + '%';
+        }
+
+        function updateOverallProgressUI(bytesTransferred, totalBytes) {
+            const percent = Math.min((bytesTransferred / totalBytes) * 100, 100);
+            document.getElementById('overallProgressText').innerText = percent.toFixed(1) + '%';
+            document.getElementById('overallProgressBar').style.width = percent + '%';
+            document.getElementById('overallSizeText').innerText = `${formatBytes(bytesTransferred)} / ${formatBytes(totalBytes)}`;
+        }
+
+        function openPreview(id) {
+            const fileData = receivedFilesCache.find(f => f.id === id);
+            if(!fileData) return;
+            const url = URL.createObjectURL(fileData.blob);
+            const container = document.getElementById('previewContainer');
+            if(fileData.mime.startsWith('image/')) {
+                container.innerHTML = `<img src="${url}" class="max-w-full max-h-[85vh] rounded-lg shadow-xl object-contain">`;
+            } else if (fileData.mime.startsWith('video/')) {
+                container.innerHTML = `<video src="${url}" controls autoplay class="max-w-full max-h-[85vh] rounded-lg shadow-xl"></video>`;
+            }
+            const modal = document.getElementById('previewModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closePreview() {
+            const modal = document.getElementById('previewModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            document.getElementById('previewContainer').innerHTML = ''; 
+        }
+    </script>
+</body>
+</html>
